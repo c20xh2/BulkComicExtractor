@@ -1,13 +1,44 @@
 import requests
 import csv
-from time import sleep
-
+from time import sleep, time
 # Your Comic Vine API key
-api_key = 'YOUR_API_KEY'
+api_key = 'YOU API'
 # Replace 'Big Comic Spirits' with the name of the series you're searching for
 series_name_query = 'Big Comic Spirits'
 # Set a delay between requests to handle rate limiting
 rate_limit_delay = 20
+
+endpoint_usage = {
+    '/search': {'count': 0, 'reset_time': time() + 3600},
+    '/volume': {'count': 0, 'reset_time': time() + 3600},
+    '/issues': {'count': 0, 'reset_time': time() + 3600},
+    '/issue': {'count': 0, 'reset_time': time() + 3600},
+}
+
+def make_request(url, headers, params):
+    global endpoint_usage  # Ensure we're modifying the global variable
+    # Extract the endpoint from the URL
+    endpoint = '/' + url.split('.com/api')[1].split('/')[1]
+
+    # Rate limiting check and wait
+    usage = endpoint_usage[endpoint]
+    current_time = time()
+    if current_time >= usage['reset_time']:
+        usage['count'] = 0
+        usage['reset_time'] = current_time + 3600
+
+    if usage['count'] >= 200:
+        sleep_time = usage['reset_time'] - current_time
+        print(f"Rate limit reached for {endpoint}. Waiting {sleep_time} seconds.")
+        sleep(sleep_time)
+        usage['count'] = 0
+        usage['reset_time'] = time() + 3600
+
+    # Corrected to use requests.get instead of make_request recursively
+    response = requests.get(url, headers=headers, params=params)
+    usage['count'] += 1
+
+    return response
 
 def search_series(api_key, query):
     base_url = 'https://comicvine.gamespot.com/api/search'
@@ -20,7 +51,7 @@ def search_series(api_key, query):
         'field_list': 'id,name',
         'limit': 1 
     }
-    response = requests.get(base_url, headers=headers, params=params)
+    response = make_request(base_url, headers=headers, params=params)
     response.raise_for_status() 
     return response.json()['results'][0]['id']
 
@@ -41,7 +72,7 @@ def fetch_all_issues_for_series(api_key, series_id):
             'limit': limit,
             'offset': offset
         }
-        response = requests.get(base_url, headers=headers, params=params)
+        response = make_request(base_url, headers=headers, params=params)
         response.raise_for_status() 
 
         data = response.json()
@@ -59,7 +90,7 @@ def fetch_volume_details(api_key, volume_id):
         'format': 'json',
         'field_list': 'name,publisher'
     }
-    response = requests.get(base_url, headers=headers, params=params)
+    response = make_request(base_url, headers=headers, params=params)
     response.raise_for_status()
     return response.json()['results']
 
@@ -71,7 +102,7 @@ def fetch_issue_details(api_key, issue_id):
         'format': 'json',
 
     }
-    response = requests.get(base_url, headers=headers, params=params)
+    response = make_request(base_url, headers=headers, params=params)
     response.raise_for_status()
 
     return response.json()['results']
@@ -109,7 +140,7 @@ def main(api_key, series_name_query):
                 })
                 sleep(rate_limit_delay)  # Wait for 20 seconds before making the next request
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 420:
+                if e.response.status_code in (420, 503):
                     print("Rate limit hit. Sleeping for an hour.")
                     sleep(3600)  # Sleep for 60 seconds if rate limit is hit
                 else:
